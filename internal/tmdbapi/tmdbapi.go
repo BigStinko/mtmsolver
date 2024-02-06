@@ -20,7 +20,7 @@ type Client struct {
 type resource interface {
 	ActorResource | ActorQueryResult |
 	MovieResource | MovieQueryResult |
-	Credits | MovieCredits
+	CastCredits | MovieCredits
 }
 
 const (
@@ -33,11 +33,12 @@ var (
 	NoTitle MovieResource = MovieResource{Title: "NoTitle", Id: 0}
 )
 
-func NewClient(header string, timeout, cacheInterval time.Duration) Client {
+func New(header string, timeout time.Duration) Client {
 	return Client{
 		httpClient: http.Client{
 			Timeout: timeout,
 		},
+		cache: tmdbcache.New(),
 		authHeader: header,
 	}
 }
@@ -60,6 +61,9 @@ func (c *Client) GetMovies(actorId int) ([]int, error) {
 			movies = append(movies, movie.Id)
 		}
 	}
+	if len(movies) > 10 {
+		movies = movies[:10]
+	}
 
 	c.cache.AddMovies(actorId, movies)
 	return movies, nil
@@ -71,7 +75,7 @@ func (c *Client) GetActors(movieId int) ([]int, error) {
 	}
 
 	url := baseURL + "movie/" + strconv.Itoa(movieId) + "/credits"
-	res, err := getResource[Credits](url, c)
+	res, err := getResource[CastCredits](url, c)
 	if err != nil { return nil, err }
 	if len(res.Cast) == 0 {
 		return []int{}, nil
@@ -82,6 +86,10 @@ func (c *Client) GetActors(movieId int) ([]int, error) {
 		if c.Character != "" {
 			actors = append(actors, c.Id)
 		}
+	}
+
+	if len(actors) > 10 {
+		actors = actors[:10]
 	}
 
 	c.cache.AddActors(movieId, actors)

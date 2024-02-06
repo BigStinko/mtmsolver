@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -11,5 +12,10 @@ import (
 func main() {
 	godotenv.Load()
 	bearerToken := os.Getenv("BEARER_TOKEN")
-	client := tmdbapi.NewClient("Bearer " + bearerToken, 5 * time.Second, 5 * time.Minute)
+	client := tmdbapi.New("Bearer " + bearerToken, 5 * time.Second)
+
+	err := client.GetPath("The Iron Claw", "High School Musical")
+	if err != nil {
+		fmt.Print(err.Error())
+	}
 }

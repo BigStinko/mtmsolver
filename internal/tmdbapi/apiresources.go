@@ -24,16 +24,16 @@ type ActorQueryResult struct {
 	TotalResults int             `json:"total_results"`
 }
 
-type Credits struct {
+type CastCredits struct {
 	Cast []struct{
 		Id        int    `json:"id"`
-		Character string `json:"order"`
+		Character string `json:"character"`
 	} `json:"cast"`
 }
 
 type MovieCredits struct {
 	Cast []struct {
 		Id	      int    `json:"id"`
-		Character string `json:"order"`
+		Character string `json:"character"`
 	} `json:"cast"`
 }
