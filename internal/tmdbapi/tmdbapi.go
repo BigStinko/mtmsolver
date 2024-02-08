@@ -15,6 +15,7 @@ type Client struct {
 	httpClient http.Client
 	cache      tmdbcache.Cache
 	authHeader string
+	searchFactor int
 }
 
 type resource interface {
@@ -43,33 +44,39 @@ func New(header string, timeout time.Duration) Client {
 	}
 }
 
-func (c *Client) GetMovies(actorId int) ([]int, error) {
+func (c *Client) SetSearchFactor(s int) {
+	c.searchFactor = s
+}
+
+func (c *Client) GetMovies(actorId int) (map[int]struct{}, error) {
 	if movies, ok := c.cache.GetMovies(actorId); ok {
 		return movies, nil
 	}
 
-	url := baseURL + "person/" + strconv.Itoa(actorId) + "/movie_credits?language=en-US"
-	res, err := getResource[MovieCredits](url, c)
+	url := baseURL
+	url += "discover/movie?include_adult=false&include_video=false&language=en-US&page=1&sort_by=popularity.desc&with_people="
+	url += strconv.Itoa(actorId)
+	res, err := getResource[MovieQueryResult](url, c)
 	if err != nil { return nil, err }
-	if len(res.Cast) == 0 {
-		return []int{}, nil
+	if len(res.Results) == 0 {
+		return nil, nil
 	}
 
-	movies := []int{}
-	for _, movie := range res.Cast {
-		if movie.Character != "" {
-			movies = append(movies, movie.Id)
-		}
+	movies := make(map[int]struct{})
+
+	for _, movieRes := range res.Results {
+		movies[movieRes.Id] = struct{}{}
 	}
-	if len(movies) > 10 {
-		movies = movies[:10]
-	}
+	/*for i := 0; i < min(len(res.Results), c.searchFactor); i++ {
+		movie := res.Results[i]
+		movies[movie.Id] = struct{}{}
+	}*/
 
 	c.cache.AddMovies(actorId, movies)
 	return movies, nil
 }
 
-func (c *Client) GetActors(movieId int) ([]int, error) {
+func (c *Client) GetActors(movieId int) (map[int]struct{}, error) {
 	if actors, ok := c.cache.GetActors(movieId); ok {
 		return actors, nil
 	}
@@ -78,18 +85,15 @@ func (c *Client) GetActors(movieId int) ([]int, error) {
 	res, err := getResource[CastCredits](url, c)
 	if err != nil { return nil, err }
 	if len(res.Cast) == 0 {
-		return []int{}, nil
+		return make(map[int]struct{}), nil
 	}
 
-	actors := []int{}
-	for _, c := range res.Cast {
-		if c.Character != "" {
-			actors = append(actors, c.Id)
+	actors := make(map[int]struct{})
+	for i := 0; i < min(len(res.Cast), c.searchFactor); i++ {
+		actor := res.Cast[i]
+		if actor.Character != "" {
+			actors[actor.Id] = struct{}{}
 		}
-	}
-
-	if len(actors) > 10 {
-		actors = actors[:10]
 	}
 
 	c.cache.AddActors(movieId, actors)

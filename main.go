@@ -3,19 +3,26 @@ package main
 import (
 	"fmt"
 	"os"
-	"time"
+	_"time"
 
-	"github.com/BigStinko/mtmsolver/internal/tmdbapi"
+	"github.com/BigStinko/mtmsolver/internal/benchmark"
+	_"github.com/BigStinko/mtmsolver/internal/tmdbapi"
 	"github.com/joho/godotenv"
 )
 
 func main() {
 	godotenv.Load()
 	bearerToken := os.Getenv("BEARER_TOKEN")
-	client := tmdbapi.New("Bearer " + bearerToken, 5 * time.Second)
+	/*client := tmdbapi.New("Bearer " + bearerToken, time.Second * 5)
+	out, err := client.GetPath("Reservoir Dogs", "Pulp Fiction")
+	if err != nil { fmt.Println(err.Error()) }
+	fmt.Println(out)*/
 
-	err := client.GetPath("The Iron Claw", "High School Musical")
+	dur, err := benchmark.Benchmark(100, "Bearer " + bearerToken, "Midsommar", "Gravity")
 	if err != nil {
-		fmt.Print(err.Error())
+		fmt.Println(err.Error())
+		return
 	}
+	
+	fmt.Println(dur.String())
 }
