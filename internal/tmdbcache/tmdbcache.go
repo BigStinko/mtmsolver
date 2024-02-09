@@ -1,92 +1,81 @@
 package tmdbcache
 
 import (
+	_"fmt"
 	"sync"
 )
 
 type Cache struct {
-	actorsMovies map[int]map[int]struct{}
-	moviesActors map[int]map[int]struct{}
-	neighbors    map[int]map[int]struct{}
-	amu *sync.RWMutex
-	mmu *sync.RWMutex
-	nmu *sync.RWMutex
+	actorsMovies sync.Map
+	moviesActors sync.Map
+	neighbors    sync.Map
 }
 
 func New() Cache {
 	return Cache{
-		actorsMovies: make(map[int]map[int]struct{}),
-		moviesActors: make(map[int]map[int]struct{}),
-		neighbors:    make(map[int]map[int]struct{}),
-		amu: &sync.RWMutex{},
-		mmu: &sync.RWMutex{},
-		nmu: &sync.RWMutex{},
-	}
-}
-
-func Test(am, ma, n map[int]map[int]struct{}) Cache {
-	return Cache{
-		actorsMovies: am,
-		moviesActors: ma,
-		neighbors: n,
-		amu: &sync.RWMutex{},
-		mmu: &sync.RWMutex{},
-		nmu: &sync.RWMutex{},
+		actorsMovies: sync.Map{},
+		moviesActors: sync.Map{},
+		neighbors:    sync.Map{},
 	}
 }
 
 func (c *Cache) GetMovies(actorId int) (map[int]struct{}, bool) {
-	c.amu.RLock()
-	defer c.amu.RUnlock()
-	val, ok := c.actorsMovies[actorId]
-	return val, ok
+	//fmt.Println("GetMovies")
+	val, ok := c.actorsMovies.Load(actorId)
+	if !ok {
+		return nil, ok
+	}
+	m, ok := val.(map[int]struct{})
+	return m, ok
 }
 
 func (c *Cache) AddMovies(actorId int, movies map[int]struct{}) {
-	c.amu.Lock()
-	defer c.amu.Unlock()
-	c.actorsMovies[actorId] = movies
+	//fmt.Println("AddMovies")
+	c.actorsMovies.Store(actorId, movies)
 }
 
 func (c *Cache) AddMovie(actorId, movieId int) {
-	c.amu.Lock()
-	defer c.amu.Unlock()
-	c.actorsMovies[actorId][movieId] = struct{}{}
+	//fmt.Println("AddMovie")
+	val, _ := c.actorsMovies.Load(actorId)
+	movies := val.(map[int]struct{}) 
+	movies[movieId] = struct{}{}
+	c.actorsMovies.Store(actorId, movies)
 }
 
 func (c *Cache) GetActors(movieId int) (map[int]struct{}, bool) {
-	c.mmu.RLock()
-	defer c.mmu.RUnlock()
-	val, ok := c.moviesActors[movieId]
-	return val, ok
+	//fmt.Println("GetActors")
+	val, ok := c.moviesActors.Load(movieId)
+	if !ok {
+		return nil, ok
+	}
+	a, ok := val.(map[int]struct{})
+	return a, ok
 }
 
 func (c *Cache) AddActors(movieId int, actors map[int]struct{}) {
-	c.mmu.Lock()
-	defer c.mmu.Unlock()
-	c.moviesActors[movieId] = actors
+	//fmt.Println("AddActors")
+	c.moviesActors.Store(movieId, actors)
 }
 
 func (c *Cache) AddActor(movieId, actorId int) {
-	c.mmu.Lock()
-	defer c.mmu.Unlock()
-	c.moviesActors[movieId][actorId] = struct{}{}
+	//fmt.Println("AddActors")
+	val, _ := c.moviesActors.Load(movieId)
+	actors := val.(map[int]struct{})
+	actors[actorId] = struct{}{}
+	c.moviesActors.Store(movieId, actors)
 }
 
 func (c *Cache) GetNeighbors(movieId int) (map[int]struct{}, bool) {
-	c.nmu.RLock()
-	defer c.nmu.RUnlock()
-
-	val, ok := c.neighbors[movieId]
-	/*if !ok {
-		val = make(map[int]struct{})
-	}*/
-	return val, ok
+	//fmt.Println("GetNeighbors")
+	val, ok := c.neighbors.Load(movieId)
+	if !ok {
+		return nil, ok
+	}
+	neighbors, ok := val.(map[int]struct{})
+	return neighbors, ok
 }
 
 func (c *Cache) AddNeighbors(movieId int, neighbors map[int]struct{}) {
-	c.nmu.Lock()
-	defer c.nmu.Unlock()
-	
-	c.neighbors[movieId] = neighbors
+	//fmt.Println("AddNeighbors")
+	c.neighbors.Store(movieId, neighbors)
 }

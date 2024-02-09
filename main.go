@@ -18,7 +18,8 @@ func main() {
 	if err != nil { fmt.Println(err.Error()) }
 	fmt.Println(out)*/
 
-	dur, err := benchmark.Benchmark(100, "Bearer " + bearerToken, "Midsommar", "Gravity")
+	//dur, err := benchmark.Benchmark(100, "Bearer " + bearerToken, "Midsommar", "Gravity")
+	dur, err := benchmark.Benchmark(900, "Bearer " + bearerToken, "Reservoir Dogs", "Pulp Fiction")
 	if err != nil {
 		fmt.Println(err.Error())
 		return

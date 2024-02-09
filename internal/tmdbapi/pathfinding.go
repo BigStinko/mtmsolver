@@ -10,42 +10,24 @@ import (
 
 var ErrNoPath = errors.New("couldn't find path")
 
-func (c *Client) GetPath(src, dest string) (string, error) {
+func (c *Client) GetPath(src, dest string) (int, error) {
 	c.SetSearchFactor(7)
-	fmt.Printf("Finding path from: %s\nTo: %s\n", src, dest)
+	//fmt.Printf("Finding path from: %s\nTo: %s\n", src, dest)
 	srcRes, err := c.GetMovieFromTitle(src)
-	if err != nil { return "", err }
+	if err != nil { return 0, err }
 	destRes, err := c.GetMovieFromTitle(dest)
-	if err != nil { return "", err }
+	if err != nil { return 0, err }
 	path, err := c.runLeftSearch(srcRes.Id, destRes.Id)
-	if err != nil { return "", err }
+	if err != nil { return 0, err }
+	fmt.Println(path)
 
-	/*pathCh := make(chan []int)
-	errCh := make(chan error)
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go c.runSearch(pathCh, errCh, &wg, srcRes.Id, destRes.Id)
-	go c.runSearch(pathCh, errCh, &wg, destRes.Id, srcRes.Id)
-	go func() {
-		wg.Wait()
-		close(pathCh)
-		close(errCh)
-	}()
-
-	var path []int
-	select {
-	case path = <- pathCh:
-	case err = <- errCh:
-		return "", err
-	}*/
-
-	if err != nil { return "", err }
+	if err != nil { return 0, err }
 	if len(path) == 1 {
-		fmt.Printf("Start and destination are the same film")
-		return "", nil
+		fmt.Print("Start and destination are the same film")
+		return 0, nil
 	}
 
-	out := ""
+	/*out := ""
 	if path[0] != srcRes.Id {
 		slices.Reverse[[]int](path)
 	}
@@ -62,63 +44,8 @@ func (c *Client) GetPath(src, dest string) (string, error) {
 		movieRes, err := c.GetMovieFromId(p)
 		if err != nil { return "", err }
 		out += fmt.Sprintf("Through: %s\nConnects to: %s\n", actorRes.Name, movieRes.Title) 
-	}
-	return out, nil
-}
-
-func (c *Client) runSearch(
-	ch chan<- []int, errCh chan<- error,
-	wg *sync.WaitGroup,
-	src, dest int) {
-	defer wg.Done()
-	result, err := c.bfs(src, dest)
-	
-	if err != nil {
-		select {
-		case errCh <- err:
-		default:
-		}
-		return
-	}
-	select {
-	case ch <- result:
-	default:
-	}
-}
-
-func (c *Client) bfs(src, dest int) ([]int, error) {
-	visited := make(map[int]struct{})
-	predecessors := make(map[int]int)
-	distances := make(map[int]int)
-	queue := list.New()
-	visited[src] = struct{}{}
-	predecessors[src] = 0
-	distances[src] = 0
-	queue.PushBack(src)
-
-	for queue.Len() != 0 {
-		current := queue.Remove(queue.Front()).(int)
-
-		if current == dest {
-			path := pathFromPredecessors(predecessors, current)
-			slices.Reverse[[]int](path)
-			return path, nil
-		}
-
-		neighbors, err := c.getNeighbors(current)
-		if err != nil { return nil, err }
-
-		for neighbor := range neighbors {
-			if _, ok := visited[neighbor]; !ok {
-				visited[neighbor] = struct{}{}
-				queue.PushBack(neighbor)
-				predecessors[neighbor] = current
-				distances[neighbor] = distances[current] + 1
-			}
-		}
-	}
-
-	return nil, ErrNoPath
+	}*/
+	return len(path), nil
 }
 
 func (c *Client) runLeftSearch(src, dest int) ([]int, error) {
@@ -126,19 +53,19 @@ func (c *Client) runLeftSearch(src, dest int) ([]int, error) {
 	var leftPath []int
 	var rightPath []int
 	leftMap, rightMap := sync.Map{}, sync.Map{}
-	found := make(chan int)
+	found := make(chan int, 1)
 	var err error = nil
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		var e error
-		leftPath, e = c.leftBfs(&leftMap, &rightMap, found, src)
+		leftPath, e = c.leftBfs(&leftMap, &rightMap, found, src, dest)
 		if e != nil { err = e }
 	}()
 	go func () {
 		defer wg.Done()
 		var e error
-		rightPath, e = c.leftBfs(&rightMap, &leftMap, found, dest)
+		rightPath, e = c.leftBfs(&rightMap, &leftMap, found, dest, src)
 		if e != nil { err = e }
 	}()
 
@@ -146,10 +73,9 @@ func (c *Client) runLeftSearch(src, dest int) ([]int, error) {
 	close(found)
 
 	if err != nil {
+		fmt.Printf("errored paths src: %v dest: %v\n", leftPath, rightPath)
 		return nil, err
 	}
-	fmt.Println(leftPath)
-	fmt.Println(rightPath)
 
 	if len(rightPath) > 1 {
 		rightPath = rightPath[1:]
@@ -157,12 +83,22 @@ func (c *Client) runLeftSearch(src, dest int) ([]int, error) {
 	slices.Reverse[[]int](leftPath)
 
 	leftPath = append(leftPath, rightPath...)
-	fmt.Println(leftPath)
 
 	return leftPath, nil
 }
 
-func (c *Client) leftBfs(leftVisited, rightVisited *sync.Map, found chan int, src int) ([]int, error) {
+// leftBfs takes two maps that will hold the visted sets of the searches
+// starting from the "left", and "right" sides of the graph. When one side 
+// of the search finds a node that is in the other sides visited set, that 
+// means that the two searches have found eachother and they should have a 
+// path to eachother through the node that they both have visited. The
+// found channel is used to communicate to the other search the node that
+// they need to return a path to.
+func (c *Client) leftBfs(
+	leftVisited, rightVisited *sync.Map,
+	found chan int,
+	src, dest int,
+) ([]int, error) {
 	predecessors := map[int]int{src: 0}
 	leftVisited.Store(src, struct{}{})
 	queue := list.New()
@@ -171,43 +107,70 @@ func (c *Client) leftBfs(leftVisited, rightVisited *sync.Map, found chan int, sr
 	for queue.Len() != 0 {
 		select {
 		case f := <- found:
-			if f == 0 {
+			if f == 0 { // indicates that the other search has errored, and
+						// therefore this search can return without doing
+						// anything
 				return nil, nil
 			}
 			return pathFromPredecessors(predecessors, f), nil
 		default:
 			current := queue.Remove(queue.Front()).(int)
 
-			if _, ok := rightVisited.Load(current); ok {
-				found <- current
+			if _, ok := rightVisited.Load(current); ok || current == dest {
+				//fmt.Println("here")
+				if len(found) < cap(found) {
+					found <- current
+				} else {
+					queue.PushBack(current)
+					continue
+				}
+				//fmt.Println("after")
 				return pathFromPredecessors(predecessors, current), nil
 			}
 			
-			neighbors, err := c.getNeighbors(current)
+			neighbors, err := c.GetNeighbors(current)
 			if err != nil { 
 				found <- 0
 				return nil, err 
 			}
 			
 			for neighbor := range neighbors {
-				if _, ok := leftVisited.Load(neighbor); !ok {
-					leftVisited.Store(neighbor, struct{}{})
+				if _, ok := leftVisited.LoadOrStore(neighbor, struct{}{}); !ok {
 					queue.PushBack(neighbor)
 					predecessors[neighbor] = current
 				}
 			}
 		}
 	}
+	fmt.Printf("about to error queue size: %d\n", queue.Len())
 	return nil, ErrNoPath
 }
 
-func pathFromPredecessors(predecessors map[int]int, src int) []int {
-	path := []int{src}
-	for predecessors[src] != 0 {
-		src = predecessors[src]
-		path = append(path, src)
+func (c *Client) GetNeighbors(movieId int) (map[int]struct{}, error) {
+	var neighbors map[int]struct{}
+	neighbors, ok := c.cache.GetNeighbors(movieId)
+	if !ok { neighbors = make(map[int]struct{}) }
+
+	actors, err := c.GetActors(movieId)
+	if err != nil { return nil, err }
+
+	for actor := range actors {
+		movies, err := c.GetMovies(actor)
+		if err != nil { return nil, err }
+		if _, ok := movies[movieId]; !ok {
+			movies[movieId] = struct{}{}
+			c.cache.AddMovies(actor, movies)
+		}
+
+		for movie := range movies {
+			if _, ok := neighbors[movie]; !ok {
+				neighbors[movie] = struct{}{}
+			}
+		}
 	}
-	return path
+
+	c.cache.AddNeighbors(movieId, neighbors)
+	return neighbors, nil
 }
 
 func (c *Client) getConnection(left, right int) (int, error) {
@@ -252,32 +215,12 @@ func (c *Client) getConnection(left, right int) (int, error) {
 	return 0, errors.New("Failure finding neighbor connection")
 }
 
-func (c *Client) getNeighbors(movieId int) (map[int]struct{}, error) {
-	if neighbors, ok := c.cache.GetNeighbors(movieId); ok {
-		return neighbors, nil
+func pathFromPredecessors(predecessors map[int]int, src int) []int {
+	path := []int{src}
+	for predecessors[src] != 0 {
+		src = predecessors[src]
+		path = append(path, src)
 	}
-	actors, err := c.GetActors(movieId)
-	if err != nil { return nil, err }
-
-	neighbors := make(map[int]struct{})
-
-	for actor := range actors {
-		movies, err := c.GetMovies(actor)
-		if err != nil { return nil, err }
-		if _, ok := movies[movieId]; !ok {
-			//fmt.Println("actor is in movie, but movie is not in actors movies")
-			movies[movieId] = struct{}{}
-			//c.cache.AddMovie(actor, movieId)
-		}
-
-		for movie := range movies {
-			if _, ok := neighbors[movie]; !ok {
-				neighbors[movie] = struct{}{}
-			}
-		}
-	}
-
-	c.cache.AddNeighbors(movieId, neighbors)
-	return neighbors, nil
+	return path
 }
 
