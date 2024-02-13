@@ -13,17 +13,16 @@ import (
 func main() {
 	godotenv.Load()
 	bearerToken := os.Getenv("BEARER_TOKEN")
-	/*client := tmdbapi.New("Bearer " + bearerToken, time.Second * 5)
-	out, err := client.GetPath("Reservoir Dogs", "Pulp Fiction")
-	if err != nil { fmt.Println(err.Error()) }
-	fmt.Println(out)*/
+	//client := tmdbapi.New("Bearer " + bearerToken, time.Second * 5)
+	//out, err := client.GetPath("The City of Lost Children", "Empire of the Sun")
+	//if err != nil { fmt.Println(err.Error()) }
+	//client.PrintPath(out)
 
-	//dur, err := benchmark.Benchmark(100, "Bearer " + bearerToken, "Midsommar", "Gravity")
-	dur, err := benchmark.Benchmark(900, "Bearer " + bearerToken, "Reservoir Dogs", "Pulp Fiction")
+	err := benchmark.Benchmark(150, "Bearer " + bearerToken, "Midsommar", "Gravity")
+	//dur, err := benchmark.Benchmark(900, "Bearer " + bearerToken, "Reservoir Dogs", "Pulp Fiction")
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
 	
-	fmt.Println(dur.String())
 }

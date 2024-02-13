@@ -2,6 +2,7 @@ package tmdbapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -16,6 +17,7 @@ type Client struct {
 	cache      tmdbcache.Cache
 	authHeader string
 	searchFactor int
+	maxRoutines int
 }
 
 type resource interface {
@@ -26,7 +28,7 @@ type resource interface {
 
 const (
 	baseURL = "https://api.themoviedb.org/3/"
-	defaultSearchParams = "?include_adult=false&language=en-US&page=1&query="
+	defaultSearchParams = "?include_adult=false&page=1&query="
 )
 
 var (
@@ -48,6 +50,10 @@ func (c *Client) SetSearchFactor(s int) {
 	c.searchFactor = s
 }
 
+func (c *Client) SetMaxRoutines(r int) {
+	c.maxRoutines = r
+}
+
 func (c *Client) GetMovies(actorId int) (map[int]struct{}, error) {
 	if movies, ok := c.cache.GetMovies(actorId); ok {
 		return movies, nil
@@ -58,9 +64,6 @@ func (c *Client) GetMovies(actorId int) (map[int]struct{}, error) {
 	url += strconv.Itoa(actorId)
 	res, err := getResource[MovieQueryResult](url, c)
 	if err != nil { return nil, err }
-	if len(res.Results) == 0 {
-		return nil, nil
-	}
 
 	movies := make(map[int]struct{})
 
@@ -84,9 +87,6 @@ func (c *Client) GetActors(movieId int) (map[int]struct{}, error) {
 	url := baseURL + "movie/" + strconv.Itoa(movieId) + "/credits"
 	res, err := getResource[CastCredits](url, c)
 	if err != nil { return nil, err }
-	if len(res.Cast) == 0 {
-		return make(map[int]struct{}), nil
-	}
 
 	actors := make(map[int]struct{})
 	for i := 0; i < min(len(res.Cast), c.searchFactor); i++ {
@@ -110,6 +110,7 @@ func (c *Client) GetMovieFromTitle(movieTitle string) (MovieResource, error) {
 	if res.TotalResults > 0 {
 		return res.Results[0], nil
 	}
+	fmt.Println(url)
 	return NoTitle, nil
 }
 

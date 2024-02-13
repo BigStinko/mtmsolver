@@ -13,81 +13,23 @@ var (
 	ErrAlreadyVisited = errors.New("Already visited this node")
 )
 
-func (c *Client) GetPath(src, dest string) (int, error) {
-	c.SetSearchFactor(7)
+func (c *Client) GetPath(src, dest string) ([]int, error) {
+	c.SetSearchFactor(8)
 	//fmt.Printf("Finding path from: %s\nTo: %s\n", src, dest)
 	srcRes, err := c.GetMovieFromTitle(src)
-	if err != nil { return 0, err }
+	if err != nil { return nil, err }
+	if srcRes == NoTitle {
+		return nil, movieNotFoundError(src)
+	}
 	destRes, err := c.GetMovieFromTitle(dest)
-	if err != nil { return 0, err }
-	path, err := c.runParallelSearch(srcRes.Id, destRes.Id)
-	if err != nil { return 0, err }
-	fmt.Println(path)
-
-	if err != nil { return 0, err }
-	if len(path) == 1 {
-		fmt.Print("Start and destination are the same film")
-		return 0, nil
+	if err != nil { return nil, err }
+	if destRes == NoTitle {
+		return nil, movieNotFoundError(dest)
 	}
-
-	/*out := ""
-	if path[0] != srcRes.Id {
-		slices.Reverse[[]int](path)
+	if destRes.Id == srcRes.Id {
+		return []int{srcRes.Id, srcRes.Id}, nil
 	}
-
-	out += fmt.Sprintf("Starting from: %s\n", srcRes.Title)
-	for i, p := range path {
-		if p == srcRes.Id {
-			continue
-		}
-		actor, err := c.getConnection(path[i - 1], p)
-		if err != nil { return "", err }
-		actorRes, err := c.GetActorFromId(actor)
-		if err != nil { return "", err }
-		movieRes, err := c.GetMovieFromId(p)
-		if err != nil { return "", err }
-		out += fmt.Sprintf("Through: %s\nConnects to: %s\n", actorRes.Name, movieRes.Title) 
-	}*/
-	return len(path), nil
-}
-
-func (c *Client) runParallelSearch(src, dest int) ([]int, error) {
-	var wg sync.WaitGroup
-	var leftPath []int
-	var rightPath []int
-	leftMap, rightMap := sync.Map{}, sync.Map{}
-	found := make(chan int, 1)
-	var err error = nil
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		var e error
-		leftPath, e = c.parallelSearch(&leftMap, &rightMap, found, src, dest)
-		if e != nil { err = e }
-	}()
-	go func () {
-		defer wg.Done()
-		var e error
-		rightPath, e = c.parallelSearch(&rightMap, &leftMap, found, dest, src)
-		if e != nil { err = e }
-	}()
-
-	wg.Wait()
-	close(found)
-
-	if err != nil {
-		fmt.Printf("errored paths src: %v dest: %v\n", leftPath, rightPath)
-		return nil, err
-	}
-
-	if len(rightPath) > 1 {
-		rightPath = rightPath[1:]
-	}
-	slices.Reverse[[]int](leftPath)
-
-	leftPath = append(leftPath, rightPath...)
-
-	return leftPath, nil
+	return c.runParallelSearch(srcRes.Id, destRes.Id)
 }
 
 // leftBfs takes two maps that will hold the visted sets of the searches
@@ -97,123 +39,159 @@ func (c *Client) runParallelSearch(src, dest int) ([]int, error) {
 // path to eachother through the node that they both have visited. The
 // found channel is used to communicate to the other search the node that
 // they need to return a path to.
-func (c *Client) parallelSearch(
-	leftVisited, rightVisited *sync.Map,
-	found chan int,
-	src, dest int,
-) ([]int, error) {
-	predecessors := map[int]int{src: 0}
-	leftVisited.Store(src, struct{}{})
-	queue := list.New()
-	queue.PushBack(src)
+func (c *Client) runParallelSearch(src, dest int) ([]int, error) {
+	srcVisited, destVisited := sync.Map{}, sync.Map{}
+	srcFoundCh, destFoundCh := make(chan int), make(chan int)
+	srcPathch, destPathCh := make(chan []int), make(chan []int)
+	errCh := make(chan error)
+	srcFound, destFound, bothFound := false, false, false
+	var srcPath []int
+	var destPath []int
 
-	for queue.Len() != 0 {
+	go c.parallelSearch(
+		&srcVisited, &destVisited,
+		src, srcFoundCh, destFoundCh,
+		srcPathch, errCh,
+	)
+	go c.parallelSearch(
+		&destVisited, &srcVisited,
+		dest, destFoundCh, srcFoundCh,
+		destPathCh, errCh,
+	)
+
+	for !bothFound {
 		select {
-		case f := <- found:
-			if f == 0 { // indicates that the other search has errored, and
-						// therefore this search can return without doing
-						// anything
-				return nil, nil
-			}
-			return pathFromPredecessors(predecessors, f), nil
+		case srcPath = <- srcPathch:
+			srcFound = true
+		case destPath = <- destPathCh:
+			destFound = true
+		case err := <- errCh:
+			return nil, err
 		default:
-			current := queue.Remove(queue.Front()).(int)
-
-			if _, ok := rightVisited.Load(current); ok || current == dest {
-				//fmt.Println("here")
-				if len(found) < cap(found) {
-					found <- current
-				} else {
-					queue.PushBack(current)
-					continue
-				}
-				//fmt.Println("after")
-				return pathFromPredecessors(predecessors, current), nil
-			}
-			
-			neighbors, err := c.GetNeighbors(current)
-			if err != nil { 
-				found <- 0
-				return nil, err 
-			}
-			
-			for neighbor := range neighbors {
-				if _, ok := leftVisited.LoadOrStore(neighbor, struct{}{}); !ok {
-					queue.PushBack(neighbor)
-					predecessors[neighbor] = current
-				}
+			if srcFound && destFound {
+				bothFound = true
 			}
 		}
 	}
-	return nil, ErrNoPath
+	srcPath = srcPath[1:]
+	slices.Reverse[[]int](srcPath)
+	srcPath = append(srcPath, destPath...)
+	return srcPath, nil
 }
 
-func (c *Client) parallelSearch3(
-	leftVisited, rightVisited *sync.Map,
-	src, dest int,
-	pathChan []int, errChan error,
+func (c *Client) parallelSearch(
+	srcVisited, destVisited *sync.Map,
+	src int, iFoundCh chan<- int, theyFoundCh <-chan int,
+	pathCh chan<- []int, errChan chan<- error,
 ) {
 	predecessors := sync.Map{}
-	leftVisited.Store(src, struct{}{})
-	queue := list.New()
-	queue.PushBack(src)
-	found := false
 	queueCh := make(chan int)
-	
+	w := newWorker()
+
+	predecessors.Store(src, 0)
+	srcVisited.Store(src, struct{}{})
+	w.enqueue(src)
+
 	go func() {
-		for node := range queueCh {
-			queue.PushBack(node)
+		for node := range queueCh{
+			w.enqueue(node)
 		}
 	}()
 
-	for queue.Len() != 0 && !found {
-		currentLevel := make([]int, queue.Len())
-		for i := range currentLevel {
-			currentLevel[i] = queue.Remove(queue.Front()).(int)
-			if _, ok := leftVisited.Load(currentLevel[i]); ok {
-				return
-			}
+	go func() {
+		for node := range theyFoundCh {
+			w.setFound()
+			path := pathFromPredecessors(&predecessors, node)
+			pathCh <- path
+			break
 		}
-		var wg sync.WaitGroup
-		stopCh := make(chan struct{})
-		errCh := make(chan error)
-		wg.Add(len(currentLevel))
+	}()
 
-		for _, current := range currentLevel {
-			go func() {
+	for !w.isFound() {
+		qLength := w.queue.Len()
+		wg := sync.WaitGroup{}
+		stopCh := make(chan struct{})
+
+		for n := 0; n < min(qLength, 10); n++ {
+			current := w.dequeue()
+			wg.Add(1)
+
+			go func() {  // TODO: test this
 				defer wg.Done()
 				neighbors, err := c.GetNeighbors(current)
 				if err != nil {
-					close(stopCh)
-					errCh <- err
 					return
 				}
-				for neighbor := range neighbors {
-					select {
-					case <- stopCh:
-						return
-					default:
-						if _, ok := leftVisited.LoadOrStore(neighbor, struct{}{}); !ok {
-							queueCh <- neighbor
-							predecessors.Store(neighbor, current)
-						}
+				node := c.evaluateNeighbors(
+					srcVisited, destVisited, &predecessors,
+					current,
+					neighbors,
+					queueCh, stopCh,
+				)
+				if node != 0 {
+					if !w.isFound() {  // TODO: check without this
+						w.setFound()
+						iFoundCh <- node
+						path := pathFromPredecessors(&predecessors, node)
+						pathCh <- path
 					}
 				}
-				
 			}()
 		}
-
 		wg.Wait()
 	}
+	close(queueCh)
 }
 
-func (c *Client) processNeighbors() {
+func (c *Client) evaluateNeighbors(
+	srcVisited, destVisited, predecessors *sync.Map,
+	current int,
+	neighbors map[int]struct{},
+	queueCh chan<- int, stopCh <-chan struct{},
+) int {
+	for neighbor := range neighbors {
+		select {
+		case <- stopCh:
+			return 0
+		default:
+			if _, ok := srcVisited.Load(neighbor); !ok {
+				queueCh <- neighbor
+				predecessors.Store(neighbor, current)
+				srcVisited.Store(neighbor, struct{}{})
+			}
+			if _, ok := destVisited.Load(neighbor); ok {
+				return neighbor
+			}
+		}
+	}
+	return 0
 }
+
+func (c *Client) PrintPath(path []int) error {
+	titles := make([]string, len(path))
+	for i, p := range path {
+		movieRes, err := c.GetMovieFromId(p)
+		if err != nil { return err }
+		titles[i] = movieRes.Title
+	}
+	fmt.Printf("Starting from: %s\n", titles[0])
+
+	for i, p := range path {
+		if i == 0 {
+			continue
+		}
+		actor, err := c.getConnection(path[i - 1], p)
+		if err != nil { return err }
+		actorRes, err := c.GetActorFromId(actor)
+		if err != nil { return err }
+		fmt.Printf("Through: %s\nConnects to: %s\n", actorRes.Name, titles[i])
+	}
+	return nil
+}
+
 
 func (c *Client) GetNeighbors(movieId int) (map[int]struct{}, error) {
-	var neighbors map[int]struct{}
-	neighbors, ok := c.cache.GetNeighbors(movieId)
-	if !ok { neighbors = make(map[int]struct{}) }
+	neighbors := c.cache.GetNeighbors(movieId)
 
 	actors, err := c.GetActors(movieId)
 	if err != nil { return nil, err }
@@ -281,95 +259,57 @@ func (c *Client) getConnection(left, right int) (int, error) {
 
 func pathFromPredecessors(predecessors *sync.Map, src int) []int {
 	path := []int{src}
-	for next, ok := predecessors.Load(src); next != 0 && ok; {
+	for {
+		next, ok := predecessors.Load(src)
+		if !ok || next == 0 {
+			break
+		}
 		src = next.(int)
 		path = append(path, src)
 	}
 	return path
 }
 
-func (c *Client) parallelSearch2(
-	leftVisited, rightVisited *sync.Map,
-	src, dest int,
-	foundCh chan int, pathCh chan<- []int, errChan chan<- error,
-) {
-	predecessors := sync.Map{}
-	queue := list.New()
-	queueCh := make(chan int)
-	found := false
-	errored := false
-	connectingNode := 0
-
-	predecessors.Store(src, 0)
-	leftVisited.Store(src, struct{}{})
-	queue.PushBack(src)
-
-	go func() {
-		for node := range queueCh{
-			queue.PushBack(node)
-		}
-	}()
-
-	for !found {
-		qLength := queue.Len()
-		wg := sync.WaitGroup{}
-		closeCh := make(chan struct{})
-
-		for n := 0; n < qLength; n++ {
-			currentNode := queue.Remove(queue.Front()).(int)
-			wg.Add(1)
-
-			go func(current int) {  // TODO: test this
-				defer wg.Done()
-				neighbors, err := c.GetNeighbors(current)
-				if err != nil {
-					close(closeCh)
-					found = true
-					errChan <- err
-					return
-				}
-				node := c.evaluateNeighbors(
-					leftVisited, rightVisited, &predecessors,
-					current,
-					neighbors,
-					queueCh, closeCh,
-				)
-				if node != 0 {
-					connectingNode = node
-					found = true
-					close(closeCh)
-				}
-			}(currentNode)
-		}
-		wg.Wait()
-		close(closeCh)
-	}
-	close(queueCh)
-	if connectingNode == 0 || errored {
-		return
-	}
-	//TODO: if found
+type worker struct {
+	queue *list.List
+	found bool
+	queueMux *sync.Mutex
+	foundMux *sync.RWMutex
 }
 
-func (c *Client) evaluateNeighbors(
-	leftVisited, rightVisited, predecessors *sync.Map,
-	current int,
-	neighbors map[int]struct{},
-	queue chan<- int, closeCh <-chan struct{},
-) int {
-	for neighbor := range neighbors {
-		select {
-		case <- closeCh:
-			return 0
-		default:
-			if _, ok := rightVisited.Load(neighbor); ok {
-				return neighbor
-			}
-			if _, ok := leftVisited.LoadOrStore(neighbor, struct{}{}); !ok {
-				queue <- neighbor
-				predecessors.Store(neighbor, current)
-			}
-		}
+func newWorker() worker {
+	return worker{
+		queue: list.New(),
+		found: false,
+		queueMux: &sync.Mutex{},
+		foundMux: &sync.RWMutex{},
 	}
-	return 0
+}
+
+func (w *worker) isFound() bool {
+	w.foundMux.RLock()
+	defer w.foundMux.RUnlock()
+	return w.found
+}
+
+func (w *worker) setFound() {
+	w.foundMux.RLock()
+	defer w.foundMux.RUnlock()
+	w.found = true
+}
+
+func (w *worker) enqueue(node int) {
+	w.queueMux.Lock()
+	defer w.queueMux.Unlock()
+	w.queue.PushBack(node)
+}
+
+func (w *worker) dequeue() int {
+	w.queueMux.Lock()
+	defer w.queueMux.Unlock()
+	return w.queue.Remove(w.queue.Front()).(int)
+}
+
+func movieNotFoundError(title string) error {
+	return errors.New(fmt.Sprintf("Could not find \"%s\"", title))
 }

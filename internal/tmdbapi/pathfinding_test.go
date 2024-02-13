@@ -1,52 +1,62 @@
 package tmdbapi
 
 import (
-	"net/http"
 	"testing"
 	"time"
-
-	"github.com/BigStinko/mtmsolver/internal/tmdbcache"
 )
 
-func TestPathfinding(t *testing.T) {
-	var e = struct{}{}
-	cache := tmdbcache.Test(
-		map[int]map[int]struct{}{
-			1037: {500:e, 14839:e, 680:e},
-			3129: {500:e, 680:e, 1724:e},
-			147: {500:e, 393:e, 24:e},
-			2969: {500:e, 2109:e},
+func TestParallelSearch(t *testing.T) {
+	tests := map[int]struct{
+		src string
+		dest string
+		expectedLength int
+	}{
+		0: {
+			src: "Reservoir Dogs",
+			dest: "Pulp Fiction",
+			expectedLength: 1,
 		},
-		map[int]map[int]struct{}{
-			500: {1037:e, 3129:e, 147:e, 2969:e},
-			14839: {1037:e},
-			680: {1037:e, 3129:e},
-			1724: {3129:e},
-			393: {147:e},
-			24: {147:e},
-			2109: {2969:e},
+		1: {
+			src: "The City of Lost Children",
+			dest: "Empire of the Sun",
+			expectedLength: 2,
 		},
-		make(map[int]map[int]struct{}),
-	)
-
-	client := Client{
-		httpClient: http.Client{
-			Timeout: time.Second * 5,
+		2: {
+			src: "Midsommar",
+			dest: "Gravity",
+			expectedLength: 3,
 		},
-		authHeader: "",
-		cache: cache,
+		3: {
+			src: "The Descent",
+			dest: "Prisoners",
+			expectedLength: 2,
+		},
+		4: {
+			src: "Fight Club",
+			dest: "Rounders",
+			expectedLength: 1,
+		},
+		5: {
+			src: "Kickboxer",
+			dest: "Dirty Rotten Scoundrels",
+			expectedLength: 3,
+		},
 	}
+	client := New("Bearer eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI1Mzg4YzAwZmExNWRjYTc0YjU1YmM1MzA1MTViM2RjNiIsInN1YiI6IjY1YTBhNGEzZDIwN2YzMDEyOGU3NDI2YiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.qbxIEsv2jty4BiZjDuh9MCZRrFc-XFrRdqq2G8JF4RY", time.Second * 5)
 
-	path, err := client.bfs(500, 680)
-	if err != nil {
-		t.Fatal(err.Error())
-	}
-
-	if len(path) != 2 {
-		t.Fatalf("Incorrect response got %v", path)
-	}
-
-	if path[0] != 500 && path[1] != 680 {
-		t.Fatalf("Incorrect response got %v", path)
+	for i := 0; i < 10; i++ {
+		for _, test := range tests {
+			path, err := client.GetPath(test.src, test.dest)
+			if err != nil {
+				t.Errorf("%s, for %s to %s", err.Error(), test.src, test.dest)
+				continue
+			}
+			length := len(path) - 1
+			if length != test.expectedLength {
+				t.Errorf("length for %s to %s incorrect with: %v, wanted length %d",
+					test.src, test.dest, path, test.expectedLength,
+				)
+			}
+		}
 	}
 }

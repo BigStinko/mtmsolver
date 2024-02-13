@@ -65,14 +65,13 @@ func (c *Cache) AddActor(movieId, actorId int) {
 	c.moviesActors.Store(movieId, actors)
 }
 
-func (c *Cache) GetNeighbors(movieId int) (map[int]struct{}, bool) {
+func (c *Cache) GetNeighbors(movieId int) map[int]struct{} {
 	//fmt.Println("GetNeighbors")
 	val, ok := c.neighbors.Load(movieId)
 	if !ok {
-		return nil, ok
+		return make(map[int]struct{})
 	}
-	neighbors, ok := val.(map[int]struct{})
-	return neighbors, ok
+	return val.(map[int]struct{})
 }
 
 func (c *Cache) AddNeighbors(movieId int, neighbors map[int]struct{}) {
