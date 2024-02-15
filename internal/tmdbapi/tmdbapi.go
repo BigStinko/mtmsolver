@@ -89,10 +89,14 @@ func (c *Client) GetActors(movieId int) (map[int]struct{}, error) {
 	if err != nil { return nil, err }
 
 	actors := make(map[int]struct{})
-	for i := 0; i < min(len(res.Cast), c.searchFactor); i++ {
-		actor := res.Cast[i]
-		if actor.Character != "" {
-			actors[actor.Id] = struct{}{}
+	limit := c.searchFactor
+	for _, actorRes := range res.Cast {
+		if limit == 0 {
+			break
+		}
+		if actorRes.Character != "" {
+			actors[actorRes.Id] = struct{}{}
+			limit--
 		}
 	}
 

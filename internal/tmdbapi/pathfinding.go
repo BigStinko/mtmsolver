@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 )
 
 var (
@@ -13,7 +14,159 @@ var (
 	ErrAlreadyVisited = errors.New("Already visited this node")
 )
 
-func (c *Client) GetPath(src, dest string) ([]int, error) {
+func GetPathExperimental(c *Client, src, dest string) ([]int, error) {
+	c.SetSearchFactor(8)
+	//fmt.Printf("Finding path from: %s\nTo: %s\n", src, dest)
+	srcRes, err := c.GetMovieFromTitle(src)
+	if err != nil { return nil, err }
+	if srcRes == NoTitle {
+		return nil, movieNotFoundError(src)
+	}
+	destRes, err := c.GetMovieFromTitle(dest)
+	if err != nil { return nil, err }
+	if destRes == NoTitle {
+		return nil, movieNotFoundError(dest)
+	}
+	if destRes.Id == srcRes.Id {
+		return []int{srcRes.Id, srcRes.Id}, nil
+	}
+	return c.runParallelSearchExperimental(srcRes.Id, destRes.Id)
+}
+
+func (c *Client) runParallelSearchExperimental(src, dest int) ([]int, error) {
+	srcVisited, destVisited := sync.Map{}, sync.Map{}
+	wg := sync.WaitGroup{}
+	srcFoundCh, destFoundCh := make(chan int), make(chan int)
+	PathCh := make(chan []int)
+	errCh := make(chan error)
+	doneCh := make(chan struct{})
+	paths := make(map[int][][]int)
+	defer close(srcFoundCh)
+	defer close(destFoundCh)
+	defer close(PathCh)
+	defer close(errCh)
+	defer close(doneCh)
+	var err error
+	go func() {
+		for path := range PathCh {
+			wg.Done()
+			paths[path[0]] = append(paths[path[0]], path)
+		}
+	}()
+	go func() {
+		for range doneCh {
+			wg.Done()
+		}
+	}()
+	go func() {
+		for e := range errCh {
+			err = e
+		}
+	}()
+	
+	wg.Add(2)
+	go c.parallelSearchExperimental(
+		&srcVisited, &destVisited, &wg,
+		src, srcFoundCh, destFoundCh,
+		PathCh, doneCh, errCh,
+	)
+	go c.parallelSearchExperimental(
+		&destVisited, &srcVisited, &wg,
+		dest, destFoundCh, srcFoundCh,
+		PathCh, doneCh, errCh,
+	)
+	wg.Wait()
+
+	if err != nil { return nil, err }
+
+	finalPath := []int{}
+	
+	for _, path := range paths {
+		if len(path) != 2 {
+			continue
+		}
+		path[0] = path[0][1:]
+		slices.Reverse[[]int](path[0])
+		path[0] = append(path[0], path[1]...)
+		if len(path[0]) < len(finalPath) || len(finalPath) == 0 {
+			finalPath = path[0]
+		}
+	}
+
+	if len(finalPath) == 0 {
+		return nil, ErrNoPath
+	}
+
+	return finalPath, nil
+}
+
+func (c *Client) parallelSearchExperimental(
+	srcVisited, destVisited *sync.Map,
+	pathWg *sync.WaitGroup,
+	src int, iFoundCh chan<- int, theyFoundCh <-chan int,
+	pathCh chan<- []int, doneCh chan<- struct{}, errChan chan<- error,
+) {
+	predecessors := sync.Map{}
+	queueCh := make(chan int)
+	defer close(queueCh)
+	currentLevel := []int{src}
+	nextLevel := []int{}
+	found := newSafeBool()
+
+	predecessors.Store(src, 0)
+	srcVisited.Store(src, struct{}{})
+
+	go func() {
+		for node := range queueCh{
+			nextLevel = append(nextLevel, node)
+		}
+	}()
+
+	go func() {
+		for node := range theyFoundCh {
+			found.set()
+			pathCh <- pathFromPredecessors(&predecessors, node)
+		}
+	}()
+
+	for !found.isFound() {
+		for len(currentLevel) > 0 && !found.isFound(){
+			wg := sync.WaitGroup{}
+			for i := 0; i < min(len(currentLevel), 10); i++ {
+				current := currentLevel[0]
+				currentLevel = currentLevel[1:]
+
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					neighbors, err := c.GetNeighbors(current)
+					if err != nil {
+						errChan <- err
+						found.set()
+						return
+					}
+					node := c.evaluateNeighborsExperimental(
+						srcVisited, destVisited, &predecessors,
+						current,
+						neighbors,
+						queueCh,
+					)
+					if node != 0 {
+						found.set()
+						pathWg.Add(2)
+						iFoundCh <- node
+						pathCh <- pathFromPredecessors(&predecessors, node)
+					}
+				}()
+			}
+			wg.Wait()
+		}
+		currentLevel, nextLevel = nextLevel, currentLevel
+	}
+	doneCh <- struct{}{}
+}
+
+func GetPath(c *Client, src, dest string) ([]int, error) {
 	c.SetSearchFactor(8)
 	//fmt.Printf("Finding path from: %s\nTo: %s\n", src, dest)
 	srcRes, err := c.GetMovieFromTitle(src)
@@ -78,6 +231,7 @@ func (c *Client) runParallelSearch(src, dest int) ([]int, error) {
 	srcPath = append(srcPath, destPath...)
 	return srcPath, nil
 }
+
 
 func (c *Client) parallelSearch(
 	srcVisited, destVisited *sync.Map,
@@ -162,6 +316,24 @@ func (c *Client) evaluateNeighbors(
 			if _, ok := destVisited.Load(neighbor); ok {
 				return neighbor
 			}
+		}
+	}
+	return 0
+}
+
+func (c *Client) evaluateNeighborsExperimental(
+	srcVisited, destVisited, predecessors *sync.Map,
+	current int,
+	neighbors map[int]struct{},
+	queueCh chan<- int,
+) int {
+	for neighbor := range neighbors {
+		if _, ok := srcVisited.LoadOrStore(neighbor, struct{}{}); !ok {
+			queueCh <- neighbor
+			predecessors.Store(neighbor, current)
+		}
+		if _, ok := destVisited.Load(neighbor); ok {
+			return neighbor
 		}
 	}
 	return 0
@@ -308,6 +480,23 @@ func (w *worker) dequeue() int {
 	w.queueMux.Lock()
 	defer w.queueMux.Unlock()
 	return w.queue.Remove(w.queue.Front()).(int)
+}
+
+type safeBool struct {
+	value int32
+}
+
+func newSafeBool() safeBool {
+	return safeBool{0}
+}
+
+func (s *safeBool) isFound() bool {
+	val := atomic.LoadInt32(&s.value)
+	return val != 0
+}
+
+func (s *safeBool) set() {
+	atomic.StoreInt32(&s.value, 1)
 }
 
 func movieNotFoundError(title string) error {
