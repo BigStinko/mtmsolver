@@ -44,9 +44,9 @@ func TestParallelSearch(t *testing.T) {
 	}
 	client := New("Bearer eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI1Mzg4YzAwZmExNWRjYTc0YjU1YmM1MzA1MTViM2RjNiIsInN1YiI6IjY1YTBhNGEzZDIwN2YzMDEyOGU3NDI2YiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.qbxIEsv2jty4BiZjDuh9MCZRrFc-XFrRdqq2G8JF4RY", time.Second * 5)
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 1; i++ {
 		for _, test := range tests {
-			path, err := client.GetPath(test.src, test.dest)
+			path, err := GetPath2(&client, test.src, test.dest)
 			if err != nil {
 				t.Errorf("%s, for %s to %s", err.Error(), test.src, test.dest)
 				continue

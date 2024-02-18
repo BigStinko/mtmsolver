@@ -9,28 +9,26 @@ import (
 
 type getPathFunc func(*tmdbapi.Client, string, string) ([]int, error)
 
-func Benchmark(
-	getPath getPathFunc,
-	token, src, dest string,
-	iter int, 
-) error {
+
+
+func Benchmark(getPath getPathFunc, token string, iter int) error {
 	fmt.Println("Running cache benchmark")
 	start := time.Now()
-	avg, err := runBenchCache(getPath, iter, token, src, dest)
+	avg, err := runBenchCache(getPath, token)
 	if err != nil { return err }
 	dur := time.Since(start)
 	dur /= time.Duration(iter)
-	fmt.Printf("Finished with average length %f, and average time of %s\n",
+	fmt.Printf("Finished with success rate %f, and average time of %s\n",
 		avg, dur.String(),
 	)
 
 	fmt.Println("Running no cache benchmark")
 	start = time.Now()
-	avg, err = runBenchNoCache(getPath, iter, token, src, dest)
+	avg, err = runBenchNoCache(getPath, token)
 	if err != nil { return err }
 	dur = time.Since(start)
 	dur /= time.Duration(iter)
-	fmt.Printf("Finished with average length %f, and average time of %s\n",
+	fmt.Printf("Finished with success rate %f, and average time of %s\n",
 		avg, dur.String(),
 	)
 	
@@ -39,78 +37,157 @@ func Benchmark(
 
 func Compare(
 	test1, test2 getPathFunc,
-	test1Title, test2Title, token, src, dest string,
+	test1Title, test2Title, token string,
 	iter int, 
-) error {
+) (float64, float64, error) {
+	avgLen1, avgLen2 := 0.0, 0.0
 	fmt.Printf("Running cache benchmark for \"%s\"...\n", test1Title)
 	start := time.Now()
-	avg, err := runBenchCache(test1, iter, token, src, dest)
-	if err != nil { return err }
+	avg, err := runBenchCache(test1, token)
+	avgLen1 += avg
+	if err != nil { return 0.0, 0.0, err }
 	dur := time.Since(start)
 	dur /= time.Duration(iter)
-	fmt.Printf("\"%s\" Finished with average length %f, and average time of %s\n",
+	fmt.Printf("\"%s\" Finished with success rate %f, and average time of %s\n",
 		test1Title, avg, dur.String(),
 	)
 
 	fmt.Printf("Running cache benchmark for \"%s\"...\n", test2Title)
 	start = time.Now()
-	avg, err = runBenchCache(test2, iter, token, src, dest)
-	if err != nil { return err }
+	avg, err = runBenchCache(test2, token)
+	avgLen2 += avg
+	if err != nil { return 0.0, 0.0, err }
 	dur = time.Since(start)
 	dur /= time.Duration(iter)
-	fmt.Printf("\"%s\" Finished with average length %f, and average time of %s\n",
+	fmt.Printf("\"%s\" Finished with success rate %f, and average time of %s\n",
 		test2Title, avg, dur.String(),
 	)
 
 	fmt.Printf("Running no cache benchmark for \"%s\"...\n", test1Title)
 	start = time.Now()
-	avg, err = runBenchNoCache(test1, iter, token, src, dest)
-	if err != nil { return err }
+	avg, err = runBenchNoCache(test1, token)
+	avgLen1 += avg
+	if err != nil { return 0.0, 0.0, err }
 	dur = time.Since(start)
 	dur /= time.Duration(iter)
-	fmt.Printf("\"%s\" Finished with average length %f, and average time of %s\n",
+	fmt.Printf("\"%s\" Finished with success rate %f, and average time of %s\n",
 		test1Title, avg, dur.String(),
 	)
 
 	fmt.Printf("Running no cache benchmark for \"%s\"...\n", test2Title)
 	start = time.Now()
-	avg, err = runBenchNoCache(test2, iter, token, src, dest)
-	if err != nil { return err }
+	avg, err = runBenchNoCache(test2, token)
+	avgLen2 += avg
+	if err != nil { return 0.0, 0.0, err }
 	dur = time.Since(start)
 	dur /= time.Duration(iter)
-	fmt.Printf("\"%s\" Finished with average length %f, and average time of %s\n",
+	fmt.Printf("\"%s\" Finished with success rate %f, and average time of %s\n",
 		test2Title, avg, dur.String(),
 	)
 	
-	return nil
+	return avgLen1 / 2.0, avgLen2 / 2.0 , nil
 }
 
 func runBenchCache(
 	getPath getPathFunc,
-	iter int,
-	token, src, dest string,
+	token string,
 ) (float64, error) {
+	tests := map[int]struct{
+		src string
+		dest string
+		expectedLength int
+	}{
+		0: {
+			src: "Reservoir Dogs",
+			dest: "Pulp Fiction",
+			expectedLength: 1,
+		},
+		1: {
+			src: "The City of Lost Children",
+			dest: "Empire of the Sun",
+			expectedLength: 2,
+		},
+		2: {
+			src: "Midsommar",
+			dest: "Gravity",
+			expectedLength: 3,
+		},
+		3: {
+			src: "The Descent",
+			dest: "Prisoners",
+			expectedLength: 2,
+		},
+		4: {
+			src: "Fight Club",
+			dest: "Rounders",
+			expectedLength: 1,
+		},
+		5: {
+			src: "Kickboxer",
+			dest: "Dirty Rotten Scoundrels",
+			expectedLength: 3,
+		},
+	}
 	count := 0
 	client := tmdbapi.New(token, time.Second * 5)
-	for i := 0; i < iter; i++ {
-		out, err := getPath(&client, src, dest)
+	for _, test := range tests {
+		fmt.Printf("From %s to %s with length %d\n", test.src, test.dest, test.expectedLength)
+		out, err := getPath(&client, test.src, test.dest)
+		fmt.Print(".")
 		if err != nil { return 0, err }
-		count += len(out) - 1
+		if len(out) - 1 == test.expectedLength {
+			count++
+		}
 	}
-	return float64(count) / float64(iter), nil
+	return float64(count) / 6.0, nil
 }
 
-func runBenchNoCache(
-	getPath getPathFunc,
-	iter int,
-	token, src, dest string,
-) (float64, error) {
-	count := 0
-	for i := 0; i < iter; i++ {
-		client := tmdbapi.New(token, time.Second * 5)
-		out, err := getPath(&client, src, dest)
-		if err != nil { return 0, err }
-		count += len(out) - 1
+func runBenchNoCache(getPath getPathFunc, token string) (float64, error) {
+	tests := map[int]struct{
+		src string
+		dest string
+		expectedLength int
+	}{
+		0: {
+			src: "Reservoir Dogs",
+			dest: "Pulp Fiction",
+			expectedLength: 1,
+		},
+		1: {
+			src: "The City of Lost Children",
+			dest: "Empire of the Sun",
+			expectedLength: 2,
+		},
+		2: {
+			src: "Midsommar",
+			dest: "Gravity",
+			expectedLength: 3,
+		},
+		3: {
+			src: "The Descent",
+			dest: "Prisoners",
+			expectedLength: 2,
+		},
+		4: {
+			src: "Fight Club",
+			dest: "Rounders",
+			expectedLength: 1,
+		},
+		5: {
+			src: "Kickboxer",
+			dest: "Dirty Rotten Scoundrels",
+			expectedLength: 3,
+		},
 	}
-	return float64(count) / float64(iter), nil
+	count := 0
+	for _, test := range tests {
+		client := tmdbapi.New(token, time.Second * 5)
+		out, err := getPath(&client, test.src, test.dest)
+		fmt.Print(".")
+		if err != nil { return 0, err }
+		if len(out) - 1 == test.expectedLength {
+			count++
+		}
+	}
+	return float64(count) / 6.0, nil
 }

@@ -23,7 +23,7 @@ type Client struct {
 type resource interface {
 	ActorResource | ActorQueryResult |
 	MovieResource | MovieQueryResult |
-	CastCredits | MovieCredits
+	Credits 
 }
 
 const (
@@ -43,6 +43,8 @@ func New(header string, timeout time.Duration) Client {
 		},
 		cache: tmdbcache.New(),
 		authHeader: header,
+		searchFactor: 80,
+		maxRoutines: 10,
 	}
 }
 
@@ -60,15 +62,19 @@ func (c *Client) GetMovies(actorId int) (map[int]struct{}, error) {
 	}
 
 	url := baseURL
-	url += "discover/movie?include_adult=false&include_video=false&language=en-US&page=1&sort_by=popularity.desc&with_people="
+	//url += "discover/movie?include_adult=false&include_video=false&language=en-US&page=1&sort_by=popularity.desc&with_people="
+	url += "person/"
 	url += strconv.Itoa(actorId)
-	res, err := getResource[MovieQueryResult](url, c)
+	url += "/movie_credits?language=en-US"
+	res, err := getResource[Credits](url, c)
 	if err != nil { return nil, err }
 
 	movies := make(map[int]struct{})
 
-	for _, movieRes := range res.Results {
-		movies[movieRes.Id] = struct{}{}
+	for _, movieRes := range res.Cast {
+		if movieRes.Character != "" {
+			movies[movieRes.Id] = struct{}{}
+		}
 	}
 	/*for i := 0; i < min(len(res.Results), c.searchFactor); i++ {
 		movie := res.Results[i]
@@ -85,7 +91,7 @@ func (c *Client) GetActors(movieId int) (map[int]struct{}, error) {
 	}
 
 	url := baseURL + "movie/" + strconv.Itoa(movieId) + "/credits"
-	res, err := getResource[CastCredits](url, c)
+	res, err := getResource[Credits](url, c)
 	if err != nil { return nil, err }
 
 	actors := make(map[int]struct{})
