@@ -43,8 +43,8 @@ func New(header string, timeout time.Duration) Client {
 		},
 		cache: tmdbcache.New(),
 		authHeader: header,
-		searchFactor: 80,
-		maxRoutines: 10,
+		searchFactor: 40,
+		maxRoutines: 20,
 	}
 }
 
@@ -147,7 +147,45 @@ func (c *Client) GetMovieFromId(movieId int) (MovieResource, error) {
 	return getResource[MovieResource](url, c)
 }
 
-func (c *Client) newRequest(method, url string, body io.Reader) (*http.Request, error) {
+func (c *Client) OverlappingActors(leftId, rightId int) ([]int, error) {
+	url := baseURL + "movie/" + strconv.Itoa(leftId) + "/credits"
+	creditResLeft, err := getResource[Credits](url, c)	
+	if err != nil { return nil, err }
+	url = baseURL + "movie/" + strconv.Itoa(rightId) + "/credits"
+	creditResRight, err := getResource[Credits](url, c)
+	if err != nil { return nil, err }
+	
+	actorsLeft := make(map[int]struct{})
+	for _, actorRes := range creditResLeft.Cast {
+		if actorRes.Character != "" {
+			actorsLeft[actorRes.Id] = struct{}{}
+		}
+	}
+	actorsRight := make(map[int]struct{})
+	for _, actorRes := range creditResRight.Cast {
+		if actorRes.Character != "" {
+			actorsRight[actorRes.Id] = struct{}{}
+		}
+	}
+
+	if len(actorsLeft) > len(actorsRight) {
+		actorsLeft, actorsRight = actorsRight, actorsLeft
+	}
+
+	out := []int{}
+	for actor := range actorsLeft {
+		if _, ok := actorsRight[actor]; ok {
+			out = append(out, actor)
+		}
+	}
+
+	return out, nil
+}
+
+func (c *Client) newRequest(
+	method, url string,
+	body io.Reader,
+) (*http.Request, error) {
 	req, err := http.NewRequest(method, url, body)
 	if err != nil { return nil, err }
 

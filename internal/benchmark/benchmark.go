@@ -14,22 +14,30 @@ type getPathFunc func(*tmdbapi.Client, string, string) ([]int, error)
 func Benchmark(getPath getPathFunc, token string, iter int) error {
 	fmt.Println("Running cache benchmark")
 	start := time.Now()
-	avg, err := runBenchCache(getPath, token)
-	if err != nil { return err }
+	total := 0.0
+	for i := 0; i < iter; i++ {
+		avg, err := runBenchCache(getPath, token)
+		if err != nil { return err }
+		total += avg
+	}
 	dur := time.Since(start)
 	dur /= time.Duration(iter)
-	fmt.Printf("Finished with success rate %f, and average time of %s\n",
-		avg, dur.String(),
+	fmt.Printf("\nFinished with success rate %f, and average time of %s\n",
+		total / float64(iter), dur.String(),
 	)
 
 	fmt.Println("Running no cache benchmark")
 	start = time.Now()
-	avg, err = runBenchNoCache(getPath, token)
-	if err != nil { return err }
+	total = 0.0
+	for i := 0; i < iter; i++ {
+		avg, err := runBenchNoCache(getPath, token)
+		if err != nil { return err }
+		total += avg
+	}
 	dur = time.Since(start)
 	dur /= time.Duration(iter)
-	fmt.Printf("Finished with success rate %f, and average time of %s\n",
-		avg, dur.String(),
+	fmt.Printf("\nFinished with success rate %f, and average time of %s\n",
+		total / float64(iter), dur.String(),
 	)
 	
 	return nil
@@ -131,7 +139,6 @@ func runBenchCache(
 	count := 0
 	client := tmdbapi.New(token, time.Second * 5)
 	for _, test := range tests {
-		fmt.Printf("From %s to %s with length %d\n", test.src, test.dest, test.expectedLength)
 		out, err := getPath(&client, test.src, test.dest)
 		fmt.Print(".")
 		if err != nil { return 0, err }
